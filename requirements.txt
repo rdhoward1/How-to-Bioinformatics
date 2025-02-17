@@ -1,0 +1,15 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - notebook
+  - jupyter
+  - r
+  - r-essentials
+  - numpy
+  - pandas
+  - matplotlib
+  - pip
+  - pip:
+    - bash_kernel==0.10.0
