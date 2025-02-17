@@ -1,0 +1,15 @@
+name: myenv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - notebook
+  - r
+  - r-essentials
+  - numpy
+  - pandas
+  - matplotlib
+  - pip
+  - pip:
+    - bash_kernel==0.10.0
