@@ -1,15 +1,39 @@
+name: bioinformatics-workshop
 channels:
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
-  - python
+  # Python and Jupyter
+  - python=3.10
   - notebook
+  - jupyterlab
   - jupyter
-  - r
-  - r-essentials
+  - jupyter-resource-usage  # Monitor resource usage
+  - ipykernel  # Ensures Jupyter works properly with Python
+  - bash_kernel  # Allows running Bash commands in notebooks
+  
+  # Python Libraries
   - numpy
   - pandas
   - matplotlib
+  - seaborn  # Useful for data visualization
+  - scipy
+
+  # R and Bioinformatics Packages
+  - r-base  # Core R installation
+  - r-essentials  # Includes common R packages (tidyverse, ggplot2, etc.)
+  - r-irkernel  # Allows running R code in Jupyter
+  - bioconductor-dada2  # DADA2 for sequence processing
+  - bioconductor-phyloseq  # Phyloseq for microbiome data analysis
+  - r-vegan  # Multivariate statistics for ecological data
+
+  # Bioinformatics Tools
+  - fastqc  # Quality control for sequencing reads
+  - multiqc  # Aggregates FastQC reports
+  - cutadapt  # Trimming and filtering sequencing reads
+
+  # Pip Packages
   - pip
   - pip:
-    - bash_kernel==0.10.0
+    - bash_kernel==0.10.0  # Keeping this as you had it
