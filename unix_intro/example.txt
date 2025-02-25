@@ -1,10 +1,12 @@
 This is line 1
+This is a pretend data file
 This is line 2
 This is line 3
 This is line 4
 This is line 5
 This is line 6
 This is line 7
+There may be fasta sequences here
 This is line 8
 This is line 9
 This is line 10
@@ -16,6 +18,7 @@ This is line 15
 This is line 16
 This is line 17
 This is line 18
+These could be fasta sequences
 This is line 19
 This is line 20
 This is line 21
@@ -43,6 +46,7 @@ This is line 42
 This is line 43
 This is line 44
 This is line 45
+I have data in here
 This is line 46
 This is line 47
 This is line 48
@@ -59,6 +63,7 @@ This is line 58
 This is line 59
 This is line 60
 This is line 61
+This is my data
 This is line 62
 This is line 63
 This is line 64
@@ -91,9 +96,11 @@ This is line 90
 This is line 91
 This is line 92
 This is line 93
+I have data in here
 This is line 94
 This is line 95
 This is line 96
+I could have fasta sequences in here
 This is line 97
 This is line 98
 This is line 99
