@@ -1,0 +1,439 @@
+---
+title: "PAST_Comparison_DESeq_LoreleiVersion"
+output: html_document
+date: "2025-09-12"
+---
+
+#Set up working directory 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/danielagutierrez/Desktop/Coral_Research/Projects/PAST_Comparison")
+```
+
+#Required Packages
+
+```{r setup, include=FALSE}
+
+library(sigFeature)
+library(tximport)
+library(tibble)
+#BiocManager::install("DESeq2") 
+library(DESeq2)
+library(dplyr)
+#BiocManager::install("PCAtools") 
+library(PCAtools)
+#install.packages("ggalt") 
+library(ggalt)
+library(ggplot2)
+library(lifecycle)
+#install.packages("ggvenn")
+library(ggvenn)
+#install.packages("VennDiagram")
+library(VennDiagram)
+library(stringr)
+library(ggpubr)
+library(pheatmap)
+library(RColorBrewer)
+library(utils)
+library(tidyr)
+#BiocManager::install("ape") 
+library(ape)
+#BiocManager::install("sva")
+library(sva)
+library("readr")
+#BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+  #Trouble shooting for EnhancedVolcano
+        #remove.packages("gtable")
+        #install.packages("gtable")
+        #.rs.restartR()  ## Restart R session
+
+```
+
+#Tximport - Count Matrix Generation
+First we read in our raw counts from Salmon and turn them into count matrices using Tximport.
+
+In the HPC, I extracted the descriptor lines in the Past genome fasta file to obtain transcript IDs. 
+```{bash}
+SERVER= hpcr8o2rnp@uta.edu
+DIR = /home/dxg2725/Projects/past_comparison/genome/
+
+grep ">" Pastreoides_transcripts_v1.fasta > Past_transcript_names.txt
+```
+
+In Excel, I cleaned the "Past_transcript_names.txt" files to remove all the extra information and to leave behind only the transcript IDs. 
+
+I then created the "Past_tx2gene.csv" file by doubling the transcript ID column. I am doing this since I am starting without annotating. 
+
+```{r}
+past_tx2gene <- read.csv("./DESeq/Past_tx2gene.csv", header = FALSE)
+head(past_tx2gene)
+
+#Generate recursive path to quants directories
+past_samples <- read.table("./DESeq/past_sample_list.csv", header = TRUE)
+past_samples
+
+setwd("./Salmon/quants_directories/host/")
+past_files <- file.path(past_samples$sample, "quant.sf")
+names(past_files) <- paste0("sample", 1:19)
+all(file.exists(past_files))
+# Should return '[1] TRUE'
+
+past_txi <- tximport(past_files, type = 'salmon',tx2gene=past_tx2gene)
+names(past_txi) 
+# [1] "abundance"           "counts"              "length"              "countsFromAbundance"
+dim(past_txi$counts)
+#61,988 
+
+past_counts <- past_txi$counts
+past_counts <- as.data.frame(past_counts)
+colnames(past_counts) <- c("P01_d_usvi_sai", "P02_d_usvi_sai", "P03_d_usvi_sai", "P04_d_usvi_sai", "P05_d_usvi_sai", "P06_sh_usvi_hal", "P07_sh_usvi_hal", "P08_sh_usvi_hal", "P09_sh_usvi_hal", "P10_sh_usvi_hal", "P11_sh_usvi_buc", "P12_sh_usvi_buc", "P13_sh_usvi_buc", "P14_sh_usvi_buc", "P15_sh_usvi_buc", "P16_d_fgb_wes", "P17_d_fgb_wes", "P18_d_fgb_wes", "P19_d_fgb_wes")
+colnames(past_counts)
+
+past_counts
+past_counts <- tibble::rownames_to_column(past_counts,"Transcript_ID")
+past_counts
+
+past_counts[2:20] <-round(past_counts[2:20], digits=0)
+past_counts <- as.data.frame(past_counts)
+write.csv(past_counts, file = "./DESeq/past_counts.csv",quote = FALSE, row.names = FALSE)
+
+past_counts <- read.csv("./DESeq/past_counts.csv") 
+
+```
+
+
+#Annotation of Genome
+
+```{linux, eval=FALSE}
+SERVER= hpcr8o2rnp
+DIR = /home/dxg2725/Projects/past_comparison/
+```
+
+```{bash}
+#Annotating on HPC
+nohup /home/dxg2725/ncbi-blast-2.14.1+/bin/blastx -query Pastreoides_transcripts_v1.fasta -db /home/dxg2725/Projects/Databases/Uniprot/uniprot_db -outfmt "6 sseqid qseqid evalue" -max_target_seqs 1 -num_threads 15 -out annotated_Pastreoides_transcripts_v1.txt
+```
+
+*Download the annotated genome into local computer (annotated_Pastreoides_transcripts_v1.txt). There is an issue with the -max_target_seqs flag, so a single transcript can get multiple hits. Therefore, file needs to be manually cleaned in local computer.
+
+
+```{r}
+
+#In local computer
+
+past_annot_unfiltered <- read.table("./annotated_Pastreoides_transcripts_v1.txt")
+head(past_annot_unfiltered)
+
+#Format file by separating first columnn eliminating sp column, and renaming columns
+
+past_annot_unfiltered <- separate_wider_delim(past_annot_unfiltered, V1 , delim = "|", names = c("sp", "Entry", "Entry_Name"))
+past_annot_unfiltered  <- past_annot_unfiltered[,-1] #Eliminate sp column
+colnames(past_annot_unfiltered)[3] <-"Transcript_ID"
+colnames(past_annot_unfiltered)[4] <- "Evalue"
+head(past_annot_unfiltered) #verify columns look like they're supposed to
+
+dim(past_annot_unfiltered) #114,496 
+
+#Arrange file by Transcript ID and then Evalue 
+
+arranged <- past_annot_unfiltered |> arrange(Transcript_ID, Evalue)
+head(arranged)
+  
+#Filter duplicated transcript annotations, keeping the annotation with the lowest e-value.
+
+past_annot_filtered <- arranged %>% distinct(Transcript_ID, .keep_all = TRUE)
+dim(past_annot_filtered) #62,803
+
+write_csv(past_annot_filtered, "./filtered_annotated_past_transcripts.csv" )
+
+```
+
+
+#DESeq Shallow vs Deep
+
+##Set Up Expression Matrix and Variables
+```{r}
+countData <- read.csv("./DESeq/past_counts.csv", row.names="Transcript_ID")
+colnames(countData)
+colData <- read.csv("PAST_Metadata_Full.csv", row.names = "Sample_Name")
+colData
+
+rownames(colData) == colnames(countData)
+# rownames(colData) and colnames(countData) must match
+
+#Assign variable types
+colData <- as.data.frame(colData)
+colData$Site <- as.factor(colData$Site)
+colData$Depth <- as.factor(colData$Depth)
+colData$Region <- as.factor(colData$Region)
+
+
+```
+
+##Set Design
+```{r}
+#This design will test for differences in expression caused by depth, controlling for geographical region.
+dds <- DESeqDataSetFromMatrix(countData = countData, 
+                                        colData = colData, 
+                                        design = ~Region + Depth) 
+# Filter out rows with an average expression less than 10. 
+dds <- dds[ rowMeans(counts(dds)) > 10, ] #This value is pretty standard
+```
+
+##Test
+
+```{r}
+test <- DESeq(dds)
+```
+
+
+###Dispersion_Plot
+```{r}
+
+pdf(file = "./DESeq/Shallow_vs_Deep/Dispersion_Plot.pdf")
+plotDispEsts(test)
+dev.off()
+```
+
+###Results
+```{r}
+res <- results(test)
+
+res <- as.data.frame(res[order(res$padj),])
+res <- rename(res, Transcript_ID = X)
+write.csv(res, file = "./DESeq/Shallow_vs_Deep/DESeq_Past_Shallow_vs_Deep.csv", row.names = FALSE)
+```
+
+###Rlog Transformation (For Visualization)
+```{r}
+
+#(Important - The diff expression estimation by DESeq always occurs on raw count data. This transformation is offered for other purposes like ML or visualization)
+
+rld <- rlog(dds, blind=FALSE) 
+rrld <- as.data.frame(assay(rld))
+rrld <- tibble::rownames_to_column(rrld,"Transcript_ID")
+write.csv(rrld, file = "./DESeq/Shallow_vs_Deep/rlogs.csv", row.names = FALSE) 
+
+```
+
+##Obtain significant DEGs
+
+```{r}
+
+res <- read.csv("./DESeq/Shallow_vs_Deep/DESeq_Past_Shallow_vs_Deep.csv")
+
+# Keeping significant DEOGs (with padj < 0.05)
+DEGs <- res %>% filter(padj < 0.05)
+#  1933 DEGs
+
+#With LFC > 0.5, LFC < -0.5
+up_DEGs <- DEGs %>% filter(log2FoldChange > 0.5) 
+dim(up_DEGs) #1254 DEOGs 
+down_DEGs <- DEGs %>% filter(log2FoldChange < -0.5)
+dim(down_DEGs)#621
+DEGs_final <- rbind(up_DEGs, down_DEGs)
+dim(DEGs_final) #1875
+
+#1328 DEGs when LFC larger than 1 and smaller than -1
+
+write.csv(DEGs, file = "./DESeq/Shallow_vs_Deep/Sig_DEGs_Sh_vs_D.csv")  
+
+```
+
+Shallow vs Deep
+```{r}
+
+#Log2Fold Change (LFC) differences in expression between Deep and Shallow samples
+res_Sh_vs_D <- results(test, contrast = c("Depth","deep","shallow"))
+resordered_Sh_vs_D <- as.data.frame(res_Sh_vs_D[order(res_Sh_vs_D$padj),]) #here we are creating a data frame and ordering it from descending to ascending p adjusted values 
+resordered_Sh_vs_D <- tibble::rownames_to_column(resordered_Sh_vs_D, "Transcript_ID")
+write.csv(resordered_Sh_vs_D, file = "./DESeq/Shallow_vs_Deep/res_Sh_vs_D.csv", row.names = FALSE)
+
+#DEGs Shallow vs Deep
+
+Sh_vs_D <- read.csv("./DESeq/Shallow_vs_Deep/res_Sh_vs_D.csv")
+Sh_vs_D_DEGs <- Sh_vs_D %>% filter(padj < 0.05)
+dim(Sh_vs_D_DEGs)# 1933 DEGs -Oct. 16th, 2024
+
+colnames(Sh_vs_D_DEGs)[colnames(Sh_vs_D_DEGs)=="X"] <- "Transcript_ID"
+
+#Upregulated in Deep
+up_Sh_vs_D_DEGs <- Sh_vs_D_DEGs %>% filter(log2FoldChange > 0.5) 
+dim(up_Sh_vs_D_DEGs)
+#621 DEGs - Oct. 16th, 2024
+
+#Downregulated in Deep
+down_Sh_vs_D_DEGs <- Sh_vs_D_DEGs %>% filter(log2FoldChange < -0.5) 
+dim(down_Sh_vs_D_DEGs)
+#1254 DEGs - Oct. 16th, 2024
+Sh_vs_Deep_DEGs_final <- rbind(up_Sh_vs_D_DEGs, down_Sh_vs_D_DEGs) 
+dim(Sh_vs_Deep_DEGs_final) #1875
+
+write.csv(Sh_vs_Deep_DEGs_final, file = "./DESeq/Shallow_vs_Deep/Sh_vs_D_DEGs.csv", row.names = FALSE)
+
+```
+
+#####Volcano Plot
+```{r}
+Sh_vs_D <- read.csv(file = "./DESeq/Shallow_vs_Deep/res_Sh_vs_D.csv")
+
+res_ShvsD <- Sh_vs_D %>% select(Entry, log2FoldChange, padj)
+res_ShvsD$padj <- as.numeric(as.character(res_ShvsD$padj))
+res_ShvsD$log2FoldChange <- as.numeric(as.character(res_ShvsD$log2FoldChange))
+res_ShvsD <- column_to_rownames(res_ShvsD, "Entry")
+
+#Find y max value (padj) to establish upper y limit (padj value).
+-max(log10(min(res_ShvsD$padj[res_ShvsD$padj > 0], na.rm = TRUE))) #[1] 2.281122, round up to 2.5
+
+pdf("./DESeq2/Shallow_vs_Deep/Volcano_Plots/VolPlot_Shallow_vs_Deep.pdf", width = 10, height = 10)
+EnhancedVolcano(res_ShvsD,
+    lab = rownames(res_ShvsD),
+    x = 'log2FoldChange',
+    y = 'padj',
+    title = 'Shallow vs Deep Tissue',
+    pCutoff = 0.05,
+    FCcutoff = 0.5,
+    pointSize = 3.0,
+    labSize = 4.0,
+    col=c('black', 'cadetblue2', 'green', 'red3'),
+    colAlpha = 1,
+    ylim = c(0, 3),
+     drawConnectors = TRUE, #Helps prevent label overlap and increase visibility 
+    boxedLabels = TRUE,#Helps prevent label overlap and increase visibility 
+    max.overlaps = Inf #Disables automatic label supression
+    )
+dev.off()
+```
+
+####Annotate DEGs
+
+```{r}
+
+Sh_vs_D_Annot_DEGs <- merge(Sh_vs_Deep_DEGs_final, past_annot_filtered, by.x = "Transcript_ID", by.y = "Transcript_ID", all.x = FALSE, all.y = FALSE )
+dim(Sh_vs_D_Annot_DEGs) #1827
+write_csv(Sh_vs_D_Annot_DEGs, "./DESeq/Shallow_vs_Deep/Sh_vs_D_Annot_DEGs.csv")
+
+#GO Terms from Uniprot Database 
+
+Uniprot <- read.csv("/users/danielagutierrez/Desktop/Coral_Research/uniprotkb_AND_reviewed_true_2023_08_21.csv")
+Sh_vs_D_Annot_DEGs <- read.csv("./DESeq/Shallow_vs_Deep/Sh_vs_D_Annot_DEGs.csv")
+Sh_vs_D_Annot_DEGs_final <- merge(Sh_vs_D_Annot_DEGs, Uniprot, by.x = "Entry", by.y = "Entry", all.x= FALSE, all.y = FALSE)
+dim(Sh_vs_D_Annot_DEGs_final) #1826 DEGs
+Sh_vs_D_Annot_DEGs_final <- Sh_vs_D_Annot_DEGs_final[,-11] #Entry_Name was doubled so I removed the duplicate column
+colnames(Sh_vs_D_Annot_DEGs_final)[9] <- "Entry_Name"
+
+write_csv(Sh_vs_D_Annot_DEGs_final, "./DESeq/Shallow_vs_Deep/Sh_vs_D_Annot_DEGs_final.csv")
+
+
+#Upregulated
+up_annotated <- Sh_vs_D_Annot_DEGs_final %>% filter(log2FoldChange > 0.5)
+up_annotated <- up_annotated |> arrange(padj) 
+dim(up_annotated) #602 DEGs
+write_csv(up_annotated, "./DESeq/Shallow_vs_Deep/Up_Annotated_Sh_vs_D_DEGs.csv")
+  
+
+#Downregulated
+down_annotated <- Sh_vs_D_Annot_DEGs_final %>% filter(log2FoldChange < -0.5) 
+down_annotated <- down_annotated |> arrange(padj)
+dim(down_annotated) #1224 DEGs
+write_csv(down_annotated, "./DESeq/Shallow_vs_Deep/Down_Annotated_Sh_vs_D_DEGs.csv")
+    
+
+
+```
+
+
+##Heatmaps
+
+###Immunity 
+I manually extracted the DEGs with GO terms related to immunity. I am building a heatmap with the top 10 upregulated and downregulated genes 
+
+1)Extract top genes 
+```{r}
+
+up_SvD_Imm <- read.csv("./DESeq/Shallow_vs_Deep/Immunity_Up_Sh_vs_Deep.csv")
+down_SvD_Imm <- read.csv("./DESeq/Shallow_vs_Deep/Immunity_Down_Sh_vs_Deep.csv")
+
+#Top ten upregulated 
+top10_up <- up_SvD_Imm[order(-up_SvD_Imm$log2FoldChange), ][1:10, ]
+
+#Top ten downregulated 
+top10_down <- down_SvD_Imm[order(-up_SvD_Imm$log2FoldChange), ][1:10, ]
+
+
+top_SvD_Imm <- rbind(top10_up, top10_down) 
+
+write.csv(top_SvD_Imm, "./DESeq/Shallow_vs_Deep/Heatmaps/Top_20_Immune_DEGs_ShalloowvsDeep.csv", row.names = FALSE)
+```
+
+2) Create count matrix
+```{r}
+rlogs_SvD <- read.csv("./DESeq/Shallow_vs_Deep/rlogs.csv")
+
+Imm_DEG_counts_SvD <- rlogs_SvD %>% filter(Transcript_ID %in% top_SvD_Imm$Transcript_ID)
+
+#Merge with top_SvD_Imm to obtain protein names
+
+Imm_DEG_counts_SvD_named <- merge(top_SvD_Imm[, c("Transcript_ID", "Protein_names")],
+                                  Imm_DEG_counts_SvD,
+                                  by = "Transcript_ID")
+
+
+write.csv(Imm_DEG_counts_SvD_named, "./DESeq/Shallow_vs_Deep/Heatmaps/Top_ImmuneDEGs_Counts_ShallowvsDeep.csv", row.names = FALSE)
+```
+
+3) Heatmap
+**Several of the top genes, annotated to the same 2 proteins (NFX1-type zinc finger-containing protein 1 (5 genes, but 2 to human and 3 to mouse) and TNF receptor-associated factor 2 (EC 2.3.2.27) (E3 ubiquitin-protein ligase TRAF2) (RING-type E3 ubiquitin transferase TRAF2) (Tumor necrosis factor type 2 receptor-associated protein 3) - 2 genes)
+**For now, I manually removed duplicates and kept the ones with the largest LFC
+**I also shortened the name of the proteins so they would fit
+```{r}
+
+Imm_DEG_counts_SvD_filt <- read.csv("./DESeq/Shallow_vs_Deep/Heatmaps/Top_ImmuneDEGs_Counts_ShallowvsDeep.csv")
+
+
+# Set row names to protein names
+Imm_DEG_counts_SvD_filt <- column_to_rownames(Imm_DEG_counts_SvD_filt, "Protein_names")
+
+Imm_DEG_counts_SvD_filt <- Imm_DEG_counts_SvD_filt[,-1]
+
+metadata_SvD <- column_to_rownames(metadata, "Sample_Name") 
+annotation_col <- metadata_SvD %>% select(Depth, Region)
+
+rownames(annotation_col) <- colnames(Imm_DEG_counts_SvD_filt)
+
+
+#Clustered Heatmap - Cannot create with just one OG
+
+pdf(file = "./DESeq/Shallow_vs_Deep/Heatmaps/Clustered_Heatmap_Shallow_vs_Deep_TopImmune_DEGs.pdf", width = 10)
+pheatmap(
+  Imm_DEG_counts_SvD_filt, 
+  color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100), 
+  kmeans_k = NA, 
+  annotation_col = annotation_col, 
+  cluster_cols = TRUE)
+dev.off()
+
+
+#Heatmap Organized By Depth
+
+ordered_samples <- rownames(annotation_col)[order(annotation_col$Depth)] #Reorder the columns of DEOG_counts by Fate_Outcome
+DEOG_counts_ordered <- Imm_DEG_counts_SvD_filt[, ordered_samples]#Reorder expression matrix
+annotation_col_ordered <- annotation_col[ordered_samples, , drop = FALSE] #Reorder annotation_col to match
+
+
+pdf(file = "./DESeq/Shallow_vs_Deep/Heatmaps/HeatmapByDepth_Shallow_vs_Deep_TopImmune_DEGs.pdf", width = 10)
+pheatmap(
+  DEOG_counts_ordered,
+  color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+  kmeans_k = NA,
+  annotation_col = annotation_col_ordered,
+  cluster_cols = FALSE,  # <-- No clustering of samples
+  cluster_rows = FALSE,   # <-- Yes clustering of genes 
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  cellheight = 10 #Adjust manually cell size
+)
+dev.off()
+```
